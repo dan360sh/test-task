@@ -1,7 +1,7 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import { EventDelayedRepository, EventRepositoryError } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -49,32 +49,57 @@ function init() {
   along with syncing with EventRepository.
 
 */
-
 class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
 
   repository: EventRepository;
-
+  private emitter: EventEmitter<EventName>;
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
+    this.emitter = emitter;
+    this.subscribeEmitter(EventName.EventB);
+    this.subscribeEmitter(EventName.EventA);
+  }
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
+  private subscribeEmitter(event: EventName) {
+    this.emitter.subscribe(event, () => {
+      let count = this.getStats(event) + 1;
+      this.setStats(event, count);
+      this.repository.saveEventData(event, count);
+      }
     );
   }
+
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
 
-  async saveEventData(eventName: EventName, _: number) {
+  private pause: boolean = false;
+  private async setPause() {
+    this.pause = true;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    this.pause = false;
+  }
+
+
+  async saveEventData(eventName: EventName, count: number) {
+    if(this.pause) {
+      return;
+    }
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
-      this;
+      const countAdd = count - this.getStats(eventName);
+      if(countAdd > 0) {
+        await this.updateEventStatsBy(eventName, countAdd);
+      }
+
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const error = e as EventRepositoryError;
+      if(error === EventRepositoryError.TOO_MANY && !this.pause) {
+        this.setPause();
+      }
     }
   }
 }
